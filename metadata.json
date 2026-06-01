@@ -1,0 +1,6 @@
+{
+  "name": "ReceiptIQ",
+  "description": "Control automático de gastos a partir de tickets con IA y detección de suscripciones.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
