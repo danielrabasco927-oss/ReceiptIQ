@@ -183,6 +183,21 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun saveBitmapToInternalStorage(bitmap: Bitmap): String? {
+        val context = getApplication<Application>()
+        val filename = "receipt_${System.currentTimeMillis()}.jpg"
+        val file = java.io.File(context.filesDir, filename)
+        return try {
+            java.io.FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            Log.e("ReceiptViewModel", "Error saving bitmap", e)
+            null
+        }
+    }
+
     // Trigger AI Extraction on selected custom image or selected mockup card
     fun triggerAiScan(bitmap: Bitmap?, onComplete: (Boolean) -> Unit) {
         isAnalyzing = true
@@ -190,6 +205,9 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             try {
+                // Save custom/captured photo locally to remember it
+                val savedLocalPath = bitmap?.let { saveBitmapToInternalStorage(it) }
+
                 // If bitmap is supplied, or standard mockup selection is set
                 val promptText = """
                     Analiza esta imagen de recibo de compra. Devuelve un objeto JSON con el siguiente formato estricto:
@@ -240,7 +258,8 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
                             subscriptionInterval = intervalResult,
                             friendCountToSplit = 1,
                             splitOwnerShare = amountResult,
-                            isScannedWithAi = true
+                            isScannedWithAi = true,
+                            imagePath = savedLocalPath
                         )
                         repository.insertReceipt(parsedReceipt)
                         isAnalyzing = false
@@ -248,21 +267,21 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
                     } catch (e: Exception) {
                         Log.e("ReceiptViewModel", "Failed to parse JSON: $cleanedJson", e)
                         // Fallback parsing failed
-                        triggerMockSimulation(onComplete)
+                        triggerMockSimulation(savedLocalPath, onComplete)
                     }
                 } else {
                     // If no API Key configured, or network fails, run simulated AI extraction showing perfect flow
-                    triggerMockSimulation(onComplete)
+                    triggerMockSimulation(savedLocalPath, onComplete)
                 }
 
             } catch (ex: Exception) {
                 Log.e("ReceiptViewModel", "API Exception", ex)
-                triggerMockSimulation(onComplete)
+                triggerMockSimulation(null, onComplete)
             }
         }
     }
 
-    private suspend fun triggerMockSimulation(onComplete: (Boolean) -> Unit) {
+    private suspend fun triggerMockSimulation(bitmapPath: String?, onComplete: (Boolean) -> Unit) {
         // Wait 1.5 seconds for visual excitement
         kotlinx.coroutines.delay(1200)
 
@@ -272,7 +291,7 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
             amount = 15.50,
             category = "Otros",
             date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
-            notes = "Ticket simulado",
+            notes = "Ticket con foto agregada",
             isSubscription = false,
             description = ""
         )
@@ -282,12 +301,13 @@ class ReceiptViewModel(application: Application) : AndroidViewModel(application)
             category = target.category,
             date = target.date,
             merchant = target.merchant,
-            notes = "${target.notes} (Simulado - Añade tu API Key para escaneo real)",
+            notes = if (bitmapPath != null) "Foto capturada y procesada" else "${target.notes} (Simulado - Añade tu API Key para escaneo real)",
             isSubscription = target.isSubscription,
             subscriptionInterval = target.subscriptionInterval,
             friendCountToSplit = 1,
             splitOwnerShare = target.amount,
-            isScannedWithAi = true
+            isScannedWithAi = true,
+            imagePath = bitmapPath
         )
 
         repository.insertReceipt(newlyScanned)

@@ -101,7 +101,7 @@ fun ReceiptIqApp() {
     var inputIsSubscription by remember { mutableStateOf(false) }
     var inputSubscriptionInterval by remember { mutableStateOf("Mensual") }
 
-    val categoriesList = listOf("Comida", "Transporte", "Ocio", "Suscripción", "Salud", "Otros")
+    val categoriesList = listOf("Comida", "Transporte", "Ocio", "Salud", "Otros")
 
     // Image Picker Launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -120,6 +120,16 @@ fun ReceiptIqApp() {
             } catch (e: Exception) {
                 null
             }
+        }
+    }
+
+    // Camera launcher to capture real time photos
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            selectedImgUri = null
+            selectedBitmap = bitmap
         }
     }
 
@@ -194,9 +204,8 @@ fun ReceiptIqApp() {
                 val screens = listOf(
                     Triple("Resumen", Icons.Default.Home, 0),
                     Triple("Escanear", Icons.Default.CameraAlt, 1),
-                    Triple("Suscrip/Dividir", Icons.Default.Refresh, 2),
-                    Triple("Estadísticas", Icons.Default.Assessment, 3),
-                    Triple("Exportar", Icons.Default.Share, 4)
+                    Triple("Organizar", Icons.Default.Folder, 2),
+                    Triple("Estadísticas", Icons.Default.Assessment, 3)
                 )
 
                 screens.forEach { (label, icon, index) ->
@@ -233,42 +242,27 @@ fun ReceiptIqApp() {
                 0 -> DashboardScreen(
                     receipts = receipts,
                     viewModel = viewModel,
-                    onDelete = { viewModel.deleteReceipt(it) },
-                    onSelectSplit = {
-                        splitBillSelected = it
-                        splitFriendsCount = if (it.friendCountToSplit > 1) it.friendCountToSplit.toFloat() else 2f
-                        viewModel.activeTab = 2 // Redirect to splits screen
-                    }
+                    onDelete = { viewModel.deleteReceipt(it) }
                 )
                 1 -> ScanScreen(
                     viewModel = viewModel,
                     selectedBitmap = selectedBitmap,
                     selectedImgUri = selectedImgUri,
                     onChooseImageClick = { imagePickerLauncher.launch("image/*") },
+                    onTakePhotoClick = { cameraLauncher.launch(null) },
                     onClearImage = {
                         selectedImgUri = null
                         selectedBitmap = null
                     }
                 )
-                2 -> SubscriptionsAndSplitsScreen(
+                2 -> TicketsOrganizerScreen(
                     receipts = receipts,
-                    subscriptions = subscriptions,
                     viewModel = viewModel,
-                    splitBillSelected = splitBillSelected,
-                    splitFriendsCount = splitFriendsCount,
-                    onSplitFriendsCountChange = { splitFriendsCount = it },
-                    onSelectSplitReceipt = { splitBillSelected = it },
-                    onRemoveSplitSelected = { splitBillSelected = null }
+                    onDelete = { viewModel.deleteReceipt(it) }
                 )
                 3 -> StatisticsScreen(
                     receipts = receipts,
                     viewModel = viewModel
-                )
-                4 -> ExportScreen(
-                    receipts = receipts,
-                    viewModel = viewModel,
-                    clipboardManager = clipboardManager,
-                    context = context
                 )
             }
 
@@ -472,13 +466,13 @@ fun formatPrice(value: Double): String {
 fun DashboardScreen(
     receipts: List<Receipt>,
     viewModel: ReceiptViewModel,
-    onDelete: (Receipt) -> Unit,
-    onSelectSplit: (Receipt) -> Unit
+    onDelete: (Receipt) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val thisMonthSum = viewModel.getMonthTotal(receipts, 0)
     val lastMonthSum = viewModel.getMonthTotal(receipts, 1)
     val predictedSum = viewModel.predictEndOfMonthSpending(receipts)
+    var dashboardViewMode by remember { mutableStateOf(0) } // 0 = List, 1 = Photos Gallery
 
     // Calculate dynamic warning / saving status comparison
     val comparePercentage = if (lastMonthSum > 0.0) {
@@ -628,7 +622,7 @@ fun DashboardScreen(
             )
         }
 
-        val categories = listOf("Comida", "Transporte", "Ocio", "Suscripción", "Salud", "Otros")
+        val categories = listOf("Comida", "Transporte", "Ocio", "Salud", "Otros")
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -747,64 +741,170 @@ fun DashboardScreen(
             }
         }
 
-        // Recent Receipts History header
+        // Recent Receipts History header & Segment Selector
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Historial de Tickets",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = "Total: ${receipts.size}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Historial de Tickets",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Total: ${receipts.size}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-        if (receipts.isEmpty()) {
-            item {
-                Box(
+                // Beautiful Material 3 style Segmented Toggle Bar
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.Receipt,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No hay tickets guardados",
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "¡Escanea tu primer ticket físico o de muestra!",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                    Button(
+                        onClick = { dashboardViewMode = 0 },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (dashboardViewMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            contentColor = if (dashboardViewMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Lista de Tickets", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = { dashboardViewMode = 1 },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (dashboardViewMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            contentColor = if (dashboardViewMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Galería de Fotos", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
+        }
+
+        if (dashboardViewMode == 0) {
+            // LIST VIEW FLOW
+            if (receipts.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(64.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No hay tickets guardados",
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "¡Escanea tu primer ticket físico o de muestra!",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(receipts, key = { it.id }) { receipt ->
+                    ReceiptItemRow(
+                        receipt = receipt,
+                        onDelete = { onDelete(receipt) }
+                    )
+                }
+            }
         } else {
-            items(receipts, key = { it.id }) { receipt ->
-                ReceiptItemRow(
-                    receipt = receipt,
-                    onDelete = { onDelete(receipt) },
-                    onSelectSplit = { onSelectSplit(receipt) }
-                )
+            // GALLERY VIEW FLOW
+            val photoReceipts = receipts.filter { !it.imagePath.isNullOrEmpty() }
+            if (photoReceipts.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.size(64.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No hay fotos de tickets",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Saca una foto cuando escanees un nuevo ticket para que aparezca en este apartado de galería.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Chunk into pairs of 2 for grid layout
+                val chunks = photoReceipts.chunked(2)
+                items(chunks) { rowItems ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowItems.forEach { receipt ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                PhotoReceiptCard(
+                                    receipt = receipt,
+                                    onDelete = { onDelete(receipt) }
+                                )
+                            }
+                        }
+                        if (rowItems.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
             }
         }
 
@@ -832,9 +932,19 @@ fun isCurrentMonth(dateStr: String): Boolean {
 @Composable
 fun ReceiptItemRow(
     receipt: Receipt,
-    onDelete: () -> Unit,
-    onSelectSplit: () -> Unit
+    onDelete: () -> Unit
 ) {
+    var showImageDetails by remember { mutableStateOf(false) }
+    val rowBitmap = remember(receipt.imagePath) {
+        receipt.imagePath?.let {
+            try {
+                android.graphics.BitmapFactory.decodeFile(it)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -846,28 +956,41 @@ fun ReceiptItemRow(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Category graphic circle icon
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(getCategoryColor(receipt.category).copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                val icon = when (receipt.category) {
-                    "Comida" -> Icons.Default.Restaurant
-                    "Transporte" -> Icons.Default.DirectionsCar
-                    "Ocio" -> Icons.Default.LocalActivity
-                    "Suscripción" -> Icons.Default.Repeat
-                    "Salud" -> Icons.Default.MedicalServices
-                    else -> Icons.Default.Category
-                }
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = getCategoryColor(receipt.category),
-                    modifier = Modifier.size(20.dp)
+            // Category graphic circle icon or image thumbnail
+            if (rowBitmap != null) {
+                Image(
+                    bitmap = rowBitmap.asImageBitmap(),
+                    contentDescription = "Miniatura del Ticket",
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showImageDetails = true }
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(getCategoryColor(receipt.category).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val icon = when (receipt.category) {
+                        "Comida" -> Icons.Default.Restaurant
+                        "Transporte" -> Icons.Default.DirectionsCar
+                        "Ocio" -> Icons.Default.LocalActivity
+                        "Suscripción" -> Icons.Default.Repeat
+                        "Salud" -> Icons.Default.MedicalServices
+                        else -> Icons.Default.Category
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = getCategoryColor(receipt.category),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -897,6 +1020,17 @@ fun ReceiptItemRow(
                                 color = SuccessGreen
                             )
                         }
+                    }
+                    if (rowBitmap != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = "Con foto",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clickable { showImageDetails = true }
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
@@ -934,33 +1068,261 @@ fun ReceiptItemRow(
                     fontSize = 16.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(
-                        onClick = onSelectSplit,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.GroupAdd,
-                            contentDescription = "Dividir ticket",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "Borrar",
-                            tint = ErrorOrange,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                Spacer(modifier = Modifier.height(4.dp))
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Borrar",
+                        tint = ErrorOrange,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
     }
+
+    if (showImageDetails && rowBitmap != null) {
+        TicketPhotoDialog(
+            receipt = receipt,
+            bitmap = rowBitmap,
+            onDismiss = { showImageDetails = false },
+            onDelete = onDelete
+        )
+    }
+}
+
+@Composable
+fun PhotoReceiptCard(
+    receipt: Receipt,
+    onDelete: () -> Unit
+) {
+    var showDetailDialog by remember { mutableStateOf(false) }
+    val bitmap = remember(receipt.imagePath) {
+        receipt.imagePath?.let {
+            try {
+                android.graphics.BitmapFactory.decodeFile(it)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    Card(
+        onClick = { showDetailDialog = true },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Ticket de ${receipt.merchant}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Receipt,
+                        tint = MaterialTheme.colorScheme.primary,
+                        contentDescription = null,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
+            
+            // Subtle dark overlay gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(80.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                        )
+                    )
+            )
+            
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = receipt.merchant,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = formatPrice(receipt.amount),
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 12.sp,
+                    color = AccentGold
+                )
+            }
+        }
+    }
+    
+    if (showDetailDialog && bitmap != null) {
+        TicketPhotoDialog(
+            receipt = receipt,
+            bitmap = bitmap,
+            onDismiss = { showDetailDialog = false },
+            onDelete = onDelete
+        )
+    }
+}
+
+@Composable
+fun TicketPhotoDialog(
+    receipt: Receipt,
+    bitmap: Bitmap?,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cerrar", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    onDelete()
+                    onDismiss()
+                }
+            ) {
+                Text("Eliminar", color = ErrorOrange)
+            }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Photo,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Foto de tu Ticket",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Foto completa",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BrokenImage,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+                }
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Comercio:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(receipt.merchant, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Importe:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = formatPrice(receipt.amount),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Fecha:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(receipt.date, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Categoría:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Badge(containerColor = getCategoryColor(receipt.category)) {
+                                Text(receipt.category, fontSize = 10.sp, color = Color.White, modifier = Modifier.padding(horizontal = 4.dp))
+                            }
+                        }
+                        if (receipt.notes.isNotEmpty()) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
+                            )
+                            Text("Notas:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(receipt.notes, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 fun getCategoryColor(cat: String): Color {
@@ -981,6 +1343,7 @@ fun ScanScreen(
     selectedBitmap: Bitmap?,
     selectedImgUri: Uri?,
     onChooseImageClick: () -> Unit,
+    onTakePhotoClick: () -> Unit,
     onClearImage: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1060,7 +1423,7 @@ fun ScanScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             viewModel.mockReceiptsList.forEach { mock ->
-                val isSelected = viewModel.selectedMockReceipt?.title == mock.title && selectedImgUri == null
+                val isSelected = viewModel.selectedMockReceipt?.title == mock.title && selectedImgUri == null && selectedBitmap == null
                 Card(
                     onClick = {
                         viewModel.selectedMockReceipt = mock
@@ -1114,26 +1477,25 @@ fun ScanScreen(
 
         // Custom Ticket Upload Box UI
         Text(
-            text = "O Paso 2: Saca/Sube un Ticket Propio de tu Galería",
+            text = "O Paso 2: Saca una Foto o Sube de tu Galería",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.align(Alignment.Start)
         )
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
-                    RoundedCornerShape(16.dp)
-                )
-                .clickable { onChooseImageClick() },
-            contentAlignment = Alignment.Center
-        ) {
-            if (selectedBitmap != null) {
+        if (selectedBitmap != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
+                        RoundedCornerShape(16.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1148,69 +1510,135 @@ fun ScanScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Listo para Analizar",
+                        text = "Foto Lista para Analizar",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     TextButton(onClick = { onClearImage() }) {
-                        Text("Quitar Imagen", color = ErrorOrange)
+                        Text("Quitar Foto", color = ErrorOrange)
                     }
                 }
-            } else if (selectedImgUri == null && viewModel.selectedMockReceipt != null) {
-                // Show preset descriptive card in center
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(130.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Take photo option card
+                Card(
+                    onClick = onTakePhotoClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.DocumentScanner,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = viewModel.selectedMockReceipt!!.title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = viewModel.selectedMockReceipt!!.description,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Toca para abrir la galería y subir otra foto",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Hacer foto",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Hacer Foto",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Usa tu cámara",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoLibrary,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Subir foto de ticket u factura",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Soportamos formato JPEG/PNG",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+
+                // Choose from gallery card
+                Card(
+                    onClick = onChooseImageClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoLibrary,
+                            contentDescription = "Subir de Galería",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Ver Galería",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Sube un archivo",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            // Remind them they have sample details if selected
+            if (viewModel.selectedMockReceipt != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DocumentScanner,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Ticket de muestra activo: ${viewModel.selectedMockReceipt!!.title}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = viewModel.selectedMockReceipt!!.description,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1250,7 +1678,188 @@ fun ScanScreen(
     }
 }
 
-// ---------------- TAB 2: SUBSCRIPTIONS & SPLITS SCREEN ----------------
+// ---------------- TAB 2: TICKETS ORGANIZER SCREEN ----------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TicketsOrganizerScreen(
+    receipts: List<Receipt>,
+    viewModel: ReceiptViewModel,
+    onDelete: (Receipt) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Todos") }
+    var sortBy by remember { mutableStateOf("Fecha ↓") } // "Fecha ↓", "Fecha ↑", "Importe ↓", "Importe ↑", "Comercio A-Z"
+    
+    val categories = listOf("Todos", "Comida", "Transporte", "Ocio", "Salud", "Otros")
+    
+    val filteredReceipts = remember(receipts, searchQuery, selectedCategory, sortBy) {
+        var list = receipts.filter { receipt ->
+            val matchesQuery = receipt.merchant.contains(searchQuery, ignoreCase = true) ||
+                               receipt.notes.contains(searchQuery, ignoreCase = true)
+            val matchesCategory = if (selectedCategory == "Todos") true else receipt.category == selectedCategory
+            matchesQuery && matchesCategory
+        }
+        
+        when (sortBy) {
+            "Fecha ↓" -> list = list.sortedByDescending { it.date }
+            "Fecha ↑" -> list = list.sortedBy { it.date }
+            "Importe ↓" -> list = list.sortedByDescending { it.amount }
+            "Importe ↑" -> list = list.sortedBy { it.amount }
+            "Comercio A-Z" -> list = list.sortedBy { it.merchant.lowercase() }
+        }
+        list
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Organizar e Historial",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 20.sp,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        
+        // Search text field
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth().testTag("search_receipt_input"),
+            placeholder = { Text("Buscar por comercio o notas...") },
+            leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(imageVector = Icons.Default.Clear, contentDescription = "Limpiar")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+        
+        // Horizontal categories selector
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            categories.forEach { cat ->
+                val isSelected = selectedCategory == cat
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { selectedCategory = cat },
+                    label = { Text(cat, fontSize = 12.sp) },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                )
+            }
+        }
+        
+        // Sorting dropdown
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Ordenar por:",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            val sortOptions = listOf("Fecha ↓", "Fecha ↑", "Importe ↓", "Importe ↑", "Comercio A-Z")
+            var expandedSortMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                Button(
+                    onClick = { expandedSortMenu = true },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text(sortBy, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+                
+                DropdownMenu(
+                    expanded = expandedSortMenu,
+                    onDismissRequest = { expandedSortMenu = false }
+                ) {
+                    sortOptions.forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt, fontSize = 12.sp) },
+                            onClick = {
+                                sortBy = opt
+                                expandedSortMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        
+        // Display list
+        if (filteredReceipts.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No se encontraron tickets",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Intenta cambiar los filtros o el término de búsqueda.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredReceipts, key = { it.id }) { receipt ->
+                    ReceiptItemRow(
+                        receipt = receipt,
+                        onDelete = { onDelete(receipt) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SubscriptionsAndSplitsScreen(
     receipts: List<Receipt>,
@@ -1721,6 +2330,64 @@ fun StatisticsScreen(receipts: List<Receipt>, viewModel: ReceiptViewModel) {
             color = MaterialTheme.colorScheme.onBackground
         )
 
+        // Row of Premium KPIs
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // KPI 1: Total
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Total Registrado", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(formatPrice(receipts.sumOf { it.amount }), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            
+            // KPI 2: Media Diaria
+            val dailyAvg = if (receipts.isNotEmpty()) (receipts.sumOf { it.amount } / 30.0) else 0.0
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Media Diaria", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(formatPrice(dailyAvg), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+
+            // KPI 3: Proyección IA
+            Card(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Proyección Fin", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(formatPrice(predictedSum), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.tertiary)
+                }
+            }
+        }
+
         // Historical bar graph custom widget
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -1774,22 +2441,44 @@ fun StatisticsScreen(receipts: List<Receipt>, viewModel: ReceiptViewModel) {
         }
 
         // Budget Optimizer Suggestions Card based on math
+        val isWarning = predictedSum > lastMonthSum && lastMonthSum > 0.0
+        val isSuccess = thisMonthSum < lastMonthSum && lastMonthSum > 0.0
+        
         Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = when {
+                    isWarning -> ErrorOrange.copy(alpha = 0.08f)
+                    isSuccess -> SuccessGreen.copy(alpha = 0.08f)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+            ),
+            border = BorderStroke(
+                width = 1.dp,
+                color = when {
+                    isWarning -> ErrorOrange.copy(alpha = 0.3f)
+                    isSuccess -> SuccessGreen.copy(alpha = 0.3f)
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                }
+            ),
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Lightbulb,
+                        imageVector = if (isWarning) Icons.Default.Warning else Icons.Default.Lightbulb,
                         contentDescription = "Tips",
-                        tint = AccentGold,
+                        tint = when {
+                            isWarning -> ErrorOrange
+                            isSuccess -> SuccessGreen
+                            else -> AccentGold
+                        },
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Consejo de Ahorro ReceiptIQ",
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1799,16 +2488,16 @@ fun StatisticsScreen(receipts: List<Receipt>, viewModel: ReceiptViewModel) {
 
                 val tipText = when {
                     thisMonthSum == 0.0 -> {
-                        "Aún no has registrado gastos este mes. Escanea tus recibos de compra habituales para calcular proyecciones y tendencias personalizadas."
+                        "Aún no has registrado gastos este mes. Escanea tus recibos de compra habituales para calcular proyecciones y tendencias personalizadas en tiempo real."
                     }
-                    predictedSum > lastMonthSum && lastMonthSum > 0.0 -> {
-                        "¡Alerta de Gasto! De continuar con tu velocidad de gasto actual, terminarás spendiendo un ${String.format("%.1f%%", ((predictedSum - lastMonthSum)/lastMonthSum)*100)} más que el mes anterior. Te aconsejamos pausar suscripciones que no uses frecuentemente o recortar del presupuesto de Ocio."
+                    isWarning -> {
+                        "¡Alerta de Gasto! De continuar con tu velocidad de gasto actual, terminarás gastando un ${String.format("%.1f%%", ((predictedSum - lastMonthSum)/lastMonthSum)*100)} más que el mes anterior. Te aconsejamos pausar gastos innecesarios o revisar el historial en la nueva pestaña Organizar."
                     }
-                    thisMonthSum < lastMonthSum && lastMonthSum > 0.0 -> {
+                    isSuccess -> {
                         "¡Felicidades! Estás logrando reducir tus costes un ${String.format("%.1f%%", ((lastMonthSum - thisMonthSum)/lastMonthSum)*100)} respecto al periodo pasado. Mantén esta velocidad de ahorro para consolidar tu balance de fin de mes."
                     }
                     else -> {
-                        "Tu velocidad se mantiene optimizada. Para obtener mayor rendimiento de tus finanzas personales, divide los tickets que pagas en comidas conjuntas con tus amigos desde la pestaña Dividir."
+                        "Tu velocidad se mantiene optimizada. Para obtener mayor rendimiento de tus finanzas personales, clasifica y depura tus tickets directamente en el Organizador."
                     }
                 }
 
@@ -1838,7 +2527,7 @@ fun StatisticsScreen(receipts: List<Receipt>, viewModel: ReceiptViewModel) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Usa la suscripción Premium para autónomos y pequeñas empresas para desbloquear detección avanzada de suscripciones fantasmas, analíticas predictivas profundas e integraciones automáticas con tu contabilidad fiscal.",
+                    text = "Usa la suscripción Premium para autónomos y pequeñas empresas para desbloquear analíticas predictivas profundas e integraciones automáticas con tu contabilidad fiscal.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

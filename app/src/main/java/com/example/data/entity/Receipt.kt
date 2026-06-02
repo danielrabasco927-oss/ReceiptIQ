@@ -15,5 +15,6 @@ data class Receipt(
     val subscriptionInterval: String = "", // "Mensual", "Anual", "Semanal"
     val friendCountToSplit: Int = 1, // 1 means only self
     val splitOwnerShare: Double = amount,
-    val isScannedWithAi: Boolean = true
+    val isScannedWithAi: Boolean = true,
+    val imagePath: String? = null
 )
